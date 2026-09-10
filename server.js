@@ -1,0 +1,14 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import webpush from 'web-push';
+const app=express(); app.use(cors()); app.use(express.json({limit:'256kb'}));
+const {VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT='mailto:admin@example.com',API_KEY='',PORT=8787}=process.env;
+if(!VAPID_PUBLIC_KEY||!VAPID_PRIVATE_KEY) throw new Error('Set VAPID_PUBLIC_KEY dan VAPID_PRIVATE_KEY di environment backend.');
+webpush.setVapidDetails(VAPID_SUBJECT,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY);
+const subscriptions=new Map();
+const guard=(req,res,next)=>{if(API_KEY && req.get('X-API-Key')!==API_KEY)return res.status(401).json({error:'Unauthorized'});next();};
+app.get('/health',(req,res)=>res.json({ok:true,service:'pwa-notification-test-backend'}));
+app.post('/api/subscribe',guard,(req,res)=>{const {userId='demo-user',subscription}=req.body||{};if(!subscription?.endpoint)return res.status(400).json({error:'subscription wajib'});subscriptions.set(userId,subscription);res.json({ok:true,userId,count:subscriptions.size});});
+app.post('/api/send',guard,async(req,res)=>{const {userId='demo-user',title='Pesan Baru',body='Ada informasi baru untuk Anda',url='./?page=messages'}=req.body||{};const sub=subscriptions.get(userId);if(!sub)return res.status(404).json({error:'Subscription user belum ada. Subscribe dari PWA dahulu.'});try{await webpush.sendNotification(sub,JSON.stringify({title,body,url}),{TTL:60});res.json({ok:true,userId});}catch(e){if(e.statusCode===404||e.statusCode===410)subscriptions.delete(userId);res.status(502).json({error:e.message,statusCode:e.statusCode||null});}});
+app.listen(Number(PORT),()=>console.log(`Web Push backend listening on :${PORT}`));
